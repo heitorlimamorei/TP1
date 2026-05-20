@@ -13,7 +13,7 @@ import entrepairs.util.TextNormalizer;
 public class CourseService {
 
     public enum CancelCourseResult {
-        DELETED,
+        CANCELED,
         NOT_FOUND
     }
 
@@ -43,6 +43,20 @@ public class CourseService {
 
     public Optional<Course> findById(int id) throws Exception {
         return courseRepository.findById(id);
+    }
+
+    public Optional<Course> findByShareCode(String shareCode) throws Exception {
+        return courseRepository.findByShareCode(shareCode);
+    }
+
+    public List<Course> listCoursesForEnrollmentSearch(User activeUser) throws Exception {
+        List<Course> courses = new java.util.ArrayList<>();
+        for (Course course : courseRepository.findAllOrderByStartDate()) {
+            if (course.getOwnerUserId() != activeUser.getId()) {
+                courses.add(course);
+            }
+        }
+        return courses;
     }
 
     public Course updateCourse(Course currentCourse, String name, LocalDate startDate, String description) throws Exception {
@@ -75,8 +89,10 @@ public class CourseService {
     }
 
     public CancelCourseResult cancelCourse(Course currentCourse) throws Exception {
-        if (courseRepository.delete(currentCourse.getId())) {
-            return CancelCourseResult.DELETED;
+        Course updatedCourse = currentCourse.copy();
+        updatedCourse.setStatus(CourseStatus.CANCELED);
+        if (courseRepository.update(updatedCourse)) {
+            return CancelCourseResult.CANCELED;
         }
         return CancelCourseResult.NOT_FOUND;
     }

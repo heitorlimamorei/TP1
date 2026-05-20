@@ -4,6 +4,7 @@ package aed3;
 import java.io.File;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 
 public class Arquivo<T extends Registro> {
     final int TAM_CABECALHO = 12;
@@ -86,6 +87,26 @@ public class Arquivo<T extends Registro> {
             }
         }
         return null;
+    }
+
+    public ArrayList<T> readAll() throws Exception {
+        ArrayList<T> objetos = new ArrayList<>();
+        arquivo.seek(TAM_CABECALHO);
+
+        while (arquivo.getFilePointer() < arquivo.length()) {
+            byte lapide = arquivo.readByte();
+            short tam = arquivo.readShort();
+            byte[] b = new byte[tam];
+            arquivo.read(b);
+
+            if (lapide == ' ') {
+                T obj = construtor.newInstance();
+                obj.fromByteArray(b);
+                objetos.add(obj);
+            }
+        }
+
+        return objetos;
     }
 
     public boolean delete(int id) throws Exception {

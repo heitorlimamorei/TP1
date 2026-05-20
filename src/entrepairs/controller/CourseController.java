@@ -16,10 +16,12 @@ import entrepairs.view.CourseView.CourseForm;
 public class CourseController {
 
     private final CourseService courseService;
+    private final EnrollmentController enrollmentController;
     private final CourseView view;
 
-    public CourseController(CourseService courseService, CourseView view) {
+    public CourseController(CourseService courseService, EnrollmentController enrollmentController, CourseView view) {
         this.courseService = courseService;
+        this.enrollmentController = enrollmentController;
         this.view = view;
     }
 
@@ -58,7 +60,7 @@ public class CourseController {
         while (currentCourse != null) {
             String option = view.showCourseDetails(currentCourse);
             if ("A".equals(option)) {
-                view.showMessage("O gerenciamento de inscritos será implementado no TP2.");
+                enrollmentController.manageCourseEnrollments(currentCourse);
             } else if ("B".equals(option)) {
                 currentCourse = updateCourse(currentCourse);
             } else if ("C".equals(option)) {
@@ -116,9 +118,9 @@ public class CourseController {
             return currentCourse;
         }
         CancelCourseResult result = courseService.cancelCourse(currentCourse);
-        if (result == CancelCourseResult.DELETED) {
-            view.showMessage("Curso cancelado e removido do sistema.");
-            return null;
+        if (result == CancelCourseResult.CANCELED) {
+            view.showMessage("Curso cancelado.");
+            return refreshCourse(currentCourse.getId());
         }
         view.showMessage("O curso não foi encontrado.");
         return null;

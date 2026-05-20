@@ -4,6 +4,7 @@ import java.lang.reflect.Constructor;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -77,6 +78,18 @@ public class Aed3CourseRepository implements AutoCloseable {
         for (UserCourseNameKey match : matches) {
             findById(match.getCourseId()).ifPresent(courses::add);
         }
+        return courses;
+    }
+
+    public List<Course> findAllOrderByStartDate() throws Exception {
+        List<Course> courses = new ArrayList<>();
+        for (CourseRecord record : file.readAll()) {
+            courses.add(toModel(record));
+        }
+        courses.sort(Comparator
+            .comparing(Course::getStartDate)
+            .thenComparing(course -> TextNormalizer.normalizeForIndex(course.getName()))
+            .thenComparingInt(Course::getId));
         return courses;
     }
 

@@ -1,10 +1,12 @@
 package entrepairs.service;
 
 import java.util.List;
+import java.util.Optional;
 
 import entrepairs.model.Course;
 import entrepairs.model.User;
 import entrepairs.repository.adapter.Aed3CourseRepository;
+import entrepairs.repository.adapter.Aed3CourseUserRepository;
 import entrepairs.repository.adapter.Aed3UserRepository;
 import entrepairs.util.TextNormalizer;
 
@@ -17,12 +19,23 @@ public class UserService {
 
     private final Aed3UserRepository userRepository;
     private final Aed3CourseRepository courseRepository;
+    private final Aed3CourseUserRepository courseUserRepository;
     private final PasswordHasher passwordHasher;
 
-    public UserService(Aed3UserRepository userRepository, Aed3CourseRepository courseRepository, PasswordHasher passwordHasher) {
+    public UserService(
+        Aed3UserRepository userRepository,
+        Aed3CourseRepository courseRepository,
+        Aed3CourseUserRepository courseUserRepository,
+        PasswordHasher passwordHasher
+    ) {
         this.userRepository = userRepository;
         this.courseRepository = courseRepository;
+        this.courseUserRepository = courseUserRepository;
         this.passwordHasher = passwordHasher;
+    }
+
+    public Optional<User> findById(int id) throws Exception {
+        return userRepository.findById(id);
     }
 
     public User updateProfile(User currentUser, String name, String email, String secretQuestion, String secretAnswer) throws Exception {
@@ -64,7 +77,9 @@ public class UserService {
             }
         }
 
+        courseUserRepository.deleteByUser(currentUser.getId());
         for (Integer courseId : courseRepository.findIdsByOwner(currentUser.getId())) {
+            courseUserRepository.deleteByCourse(courseId);
             courseRepository.delete(courseId);
         }
 
