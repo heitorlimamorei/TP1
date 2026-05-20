@@ -9,7 +9,7 @@
 
 ## Descrição do sistema
 
-O projeto implementa o TP1 do sistema **EntrePares 1.0**, responsável pelo cadastro e autenticação de usuários da PUC Minas e pelo gerenciamento de cursos livres ofertados por esses próprios usuários.
+O projeto implementa o sistema **EntrePares 1.0**, responsável pelo cadastro e autenticação de usuários da PUC Minas, pelo gerenciamento de cursos livres e pelas inscrições de usuários em cursos ofertados por outras pessoas.
 
 Neste trabalho foram implementados:
 
@@ -18,11 +18,15 @@ Neste trabalho foram implementados:
 - CRUD de usuários
 - CRUD de cursos
 - vínculo 1:N entre usuário e cursos
+- vínculo N:N entre usuários e cursos por meio da entidade `CourseUser` (`CursoUsuario`)
 - listagem dos cursos do usuário ativo em ordem alfabética
+- busca de cursos de outras pessoas por código NanoID
+- listagem completa de cursos de outras pessoas com paginação de 10 itens
+- inscrição e cancelamento de inscrição pelo aluno
+- gestão de inscritos pelo proponente do curso
+- exportação CSV da lista de inscritos
 - controle de estado do curso
 - interface textual em CLI seguindo MVC
-
-As inscrições em cursos ainda não foram implementadas neste TP e aparecem na interface apenas como placeholder para o TP2.
 
 ## Arquitetura
 
@@ -38,22 +42,22 @@ O projeto preserva a infraestrutura base fornecida em aula no pacote [`src/aed3`
   - monta as dependências e inicia o fluxo principal em `Application`
 - `src/entrepairs/controller`
   - coordena os fluxos da interface e delega regras aos serviços
-  - classes: `ApplicationController`, `AuthController`, `UserController`, `CourseController`
+  - classes: `ApplicationController`, `AuthController`, `UserController`, `CourseController`, `EnrollmentController`
 - `src/entrepairs/view`
   - camada de CLI
   - renderiza menus, mensagens e coleta entradas do usuário
 - `src/entrepairs/model`
   - entidades de domínio
-  - classes: `User`, `Course` e enum `CourseStatus`
+  - classes: `User`, `Course`, `CourseUser` e enum `CourseStatus`
 - `src/entrepairs/service`
   - regras de negócio de autenticação, perfil e cursos
   - abstrações de suporte como `PasswordHasher` e `ShareCodeGenerator`
 - `src/entrepairs/repository/adapter`
   - adaptadores concretos sobre a infraestrutura `aed3`
-  - classes: `Aed3UserRepository`, `Aed3CourseRepository`, `UserRecord`, `CourseRecord`
+  - classes: `Aed3UserRepository`, `Aed3CourseRepository`, `Aed3CourseUserRepository`, `UserRecord`, `CourseRecord`, `CourseUserRecord`
 - `src/entrepairs/repository/index`
   - chaves persistidas nas árvores B+
-  - classes: `UserEmailKey`, `CourseShareCodeKey`, `UserCourseKey`, `UserCourseNameKey`
+  - classes: `UserEmailKey`, `CourseShareCodeKey`, `UserCourseKey`, `UserCourseNameKey`, `CourseEnrollmentKey`, `UserEnrollmentKey`
 - `src/entrepairs/util`
   - utilitários de normalização, datas e padronização de chaves
 
@@ -71,6 +75,7 @@ O projeto preserva a infraestrutura base fornecida em aula no pacote [`src/aed3`
 - O código da aplicação foi estruturado em inglês, com separação explícita entre domínio e persistência.
 - As entidades de domínio (`User` e `Course`) não implementam diretamente `Registro`; a serialização fica isolada em `UserRecord` e `CourseRecord`.
 - Os índices secundários e o relacionamento 1:N foram implementados com árvores B+ persistidas em disco.
+- O relacionamento N:N entre cursos e usuários foi implementado com um CRUD próprio de associação e duas árvores B+: uma por curso e outra por usuário.
 - O hash da senha e da resposta secreta foi abstraído por `PasswordHasher`, com implementação atual em `Sha256PasswordHasher`.
 - A geração do código compartilhável do curso foi abstraída por `ShareCodeGenerator`, com implementação atual em `NanoIdShareCodeGenerator`.
 
@@ -97,6 +102,13 @@ O projeto preserva a infraestrutura base fornecida em aula no pacote [`src/aed3`
 - `shareCode`
 - `status`
 
+#### Inscrição (`CourseUser`)
+
+- `id`
+- `courseId`
+- `userId`
+- `enrollmentDate`
+
 #### Estado do curso (`CourseStatus`)
 
 - `0` `OPEN_FOR_ENROLLMENT`: curso aberto para inscrições
@@ -114,6 +126,9 @@ Os registros persistidos em arquivo binário foram desacoplados das entidades de
   - serializa os dados de `Course`
   - armazena a data como `epochDay`
   - armazena o estado como `statusCode`
+- `CourseUserRecord`
+  - serializa a associação entre curso e usuário
+  - armazena a data de inscrição como `epochDay`
 
 ### Registros de índice
 
@@ -127,6 +142,10 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
   - relacionamento `ownerUserId -> courseId`
 - `UserCourseNameKey`
   - ordenação dos cursos do usuário por nome normalizado
+- `CourseEnrollmentKey`
+  - relacionamento `courseId -> courseUserId`
+- `UserEnrollmentKey`
+  - relacionamento `userId -> courseUserId`
 
 ## Persistência e índices
 
@@ -143,6 +162,13 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - índice secundário por código compartilhável: `data/indexes/courses/share-code.idx`
 - índice por nome do curso dentro do usuário: `data/indexes/courses/owner-name.idx`
 - índice de relacionamento 1:N entre usuário e cursos: `data/indexes/courses/owner-relation.idx`
+
+### Inscrições
+
+- arquivo principal: `data/course-users/course-users.db`
+- índice direto por ID: `HashExtensivel`, mantido internamente por `aed3.Arquivo`
+- índice N:N por curso: `data/indexes/course-users/course.idx`
+- índice N:N por usuário: `data/indexes/course-users/user.idx`
 
 ## Fluxos implementados
 
@@ -167,16 +193,34 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - corrigir dados do curso
 - encerrar inscrições
 - concluir curso
-- cancelar curso
+- cancelar curso, marcando o estado como `CANCELED`
+- gerenciar inscritos no curso
+- visualizar nome, e-mail e data de inscrição de cada inscrito
+- cancelar uma inscrição específica
+- exportar a lista de inscritos em CSV
+
+### Minhas inscrições
+
+- listar cursos em que o usuário ativo está inscrito, exibindo estados especiais do curso
+- buscar curso por código NanoID
+- listar todos os cursos de outras pessoas com paginação de 10 itens
+- visualizar dados completos do curso e do autor
+- fazer inscrição em cursos abertos
+- cancelar a própria inscrição
+- manter a busca por palavras-chave como item reservado para o TP3
 
 ### Regras de negócio
 
 - o e-mail do usuário é normalizado e deve ser único
 - o código compartilhável do curso é gerado automaticamente e deve ser único
 - novos cursos sempre são vinculados ao usuário logado
+- usuários não podem se inscrever nos próprios cursos
+- inscrições duplicadas para o mesmo par usuário/curso são bloqueadas
+- novas inscrições só são permitidas em cursos com estado `OPEN_FOR_ENROLLMENT`
+- o cancelamento de curso preserva o curso com estado `CANCELED`, permitindo que inscrições existentes exibam esse estado
 - um usuário não pode ser excluído enquanto possuir cursos ativos
-- se o usuário só possuir cursos inativos, os cursos são removidos antes da exclusão da conta
-- no escopo do TP1, cancelar um curso remove o curso do sistema
+- se o usuário só possuir cursos inativos, os cursos e suas inscrições são removidos antes da exclusão da conta
+- ao excluir uma conta, inscrições feitas pelo usuário em cursos de outras pessoas também são removidas
 
 ## Principais classes do projeto
 
@@ -190,6 +234,7 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - `entrepairs.controller.AuthController`
 - `entrepairs.controller.UserController`
 - `entrepairs.controller.CourseController`
+- `entrepairs.controller.EnrollmentController`
 
 ### Views
 
@@ -198,12 +243,14 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - `entrepairs.view.HomeView`
 - `entrepairs.view.UserView`
 - `entrepairs.view.CourseView`
+- `entrepairs.view.EnrollmentView`
 
 ### Services
 
 - `entrepairs.service.AuthService`
 - `entrepairs.service.UserService`
 - `entrepairs.service.CourseService`
+- `entrepairs.service.EnrollmentService`
 - `entrepairs.service.PasswordHasher`
 - `entrepairs.service.Sha256PasswordHasher`
 - `entrepairs.service.ShareCodeGenerator`
@@ -213,8 +260,10 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 
 - `entrepairs.repository.adapter.Aed3UserRepository`
 - `entrepairs.repository.adapter.Aed3CourseRepository`
+- `entrepairs.repository.adapter.Aed3CourseUserRepository`
 - `entrepairs.repository.adapter.UserRecord`
 - `entrepairs.repository.adapter.CourseRecord`
+- `entrepairs.repository.adapter.CourseUserRecord`
 - `aed3.Arquivo`
 - `aed3.HashExtensivel`
 - `aed3.ArvoreBMais`
@@ -225,6 +274,8 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - `entrepairs.repository.index.CourseShareCodeKey`
 - `entrepairs.repository.index.UserCourseKey`
 - `entrepairs.repository.index.UserCourseNameKey`
+- `entrepairs.repository.index.CourseEnrollmentKey`
+- `entrepairs.repository.index.UserEnrollmentKey`
 - `entrepairs.util.TextNormalizer`
 - `entrepairs.util.IndexKeys`
 - `entrepairs.util.DateFormats`
@@ -259,7 +310,8 @@ Assim, a validação descrita e reproduzível a partir deste repositório está 
 
 - compilação com `javac`
 - testes de fumaça executando a CLI
-- verificação manual dos fluxos de autenticação, usuário e cursos
+- teste de fumaça automatizado em diretório temporário criando autor, curso, aluno e inscrição
+- verificação manual dos fluxos de autenticação, usuário, cursos e inscrições
 
 Para reiniciar os dados persistidos antes de um novo teste manual:
 
@@ -298,6 +350,35 @@ DATA DE INÍCIO: 20/05/2026
 ESTADO........: 0 - Curso ativo e recebendo inscrições
 ```
 
+### Inscrições
+
+```text
+EntrePares 1.0
+--------------
+> Início > Minhas inscrições
+
+INSCRIÇÕES
+Nenhuma inscrição cadastrada.
+
+(A) Buscar curso por código
+(B) Buscar curso por palavras-chave
+(C) Listar todos os cursos
+```
+
+```text
+EntrePares 1.0
+--------------
+> Início > Minhas inscrições > Lista de cursos
+
+Página 1 de 1
+
+(1) Curso Teste - 20/06/2026
+```
+
+```text
+Inscrição realizada com sucesso.
+```
+
 ### Regra de exclusão de usuário
 
 ```text
@@ -319,33 +400,41 @@ Sugestão de roteiro:
 1. cadastro de usuário
 2. login
 3. criação de curso
-4. alteração de estado do curso
-5. tentativa de excluir usuário com curso ativo
-6. conclusão do curso
-7. exclusão do usuário
+4. login com outro usuário
+5. listagem de cursos e inscrição
+6. gerenciamento de inscritos pelo autor
+7. exportação CSV
 
 ## Checklist solicitado
 
-### Há um CRUD de usuários com persistência em arquivo e índices diretos e indiretos funcionando corretamente?
+### Há um CRUD da entidade de associação CursoUsuario (que estende a classe ArquivoIndexado, acrescentando Tabelas Hash Extensíveis e Árvores B+ como índices diretos e indiretos conforme necessidade) que funciona corretamente?
 
-**Sim.** O CRUD de usuários usa `aed3.Arquivo` para persistência principal, índice direto por hash extensível e índice secundário por e-mail com árvore B+ no `Aed3UserRepository`.
+**Sim.** Dentro da arquitetura deste projeto, a entidade de associação foi implementada como `CourseUser` (`CursoUsuario`) com CRUD em `Aed3CourseUserRepository`. O repositório usa `aed3.Arquivo`, que mantém o índice direto com Hash Extensível, e acrescenta duas Árvores B+: `CourseEnrollmentKey` para `courseId -> courseUserId` e `UserEnrollmentKey` para `userId -> courseUserId`.
 
-### Há um CRUD de cursos com persistência em arquivo e índices diretos e indiretos funcionando corretamente?
+### A visão de inscrições está corretamente implementada e permite consultas aos cursos em que um usuário está inscrito?
 
-**Sim.** O CRUD de cursos usa `aed3.Arquivo` para persistência principal e acrescenta índices B+ para código compartilhável, ordenação por nome e relacionamento por usuário.
+**Sim.** `EnrollmentController` e `EnrollmentView` implementam o menu "Minhas inscrições", listam os cursos do usuário ativo, mostram dados completos do curso e permitem cancelar a própria inscrição.
 
-### Os cursos estão vinculados aos usuários usando o `ownerUserId` como chave estrangeira lógica?
+### A visão de cursos funciona corretamente e permite a gestão dos usuários inscritos em um curso?
 
-**Sim.** O campo `ownerUserId` em `Course` registra o dono do curso e é usado pelos índices de relacionamento e ordenação.
+**Sim.** A opção "Gerenciar inscritos no curso" em "Meus cursos" lista usuários inscritos, mostra nome, e-mail e data de inscrição, permite cancelar uma inscrição e exporta a lista em CSV.
 
-### Há uma árvore B+ que registre o relacionamento 1:N entre usuários e cursos?
+### Há uma visualização dos cursos de outras pessoas por meio de um código NanoID?
 
-**Sim.** O índice persistido `data/indexes/courses/owner-relation.idx` registra o par `ownerUserId -> courseId`.
+**Sim.** A opção "Buscar curso por código" consulta o índice `CourseShareCodeKey` e abre diretamente a tela completa do curso encontrado, sem passar pela tela de lista.
+
+### A integridade do relacionamento entre cursos e usuários está mantida em todas as operações?
+
+**Sim.** O sistema bloqueia inscrição duplicada, impede inscrição no próprio curso, só permite novas inscrições em cursos abertos, remove inscrições ao excluir usuário e remove inscrições de cursos removidos fisicamente durante exclusão de conta. O cancelamento de curso marca o curso como `CANCELED`, preservando as inscrições existentes para exibição do estado.
 
 ### O trabalho compila corretamente?
 
-**Sim.** O projeto compila com `javac` sem erros.
+**Sim.** O projeto compila com `javac -d out $(find src -name '*.java' | sort)` sem erros.
 
-### O trabalho está completo e funcionando sem erros de execução, dentro do escopo do TP1?
+### O trabalho está completo e funcionando sem erros de execução?
 
-**Sim.** Cadastro, autenticação, recuperação de senha, CRUD de usuários, CRUD de cursos, vínculo 1:N, ordenação alfabética e transições de estado foram validados com testes de fumaça. A funcionalidade de inscrições permanece como placeholder porque pertence ao TP2.
+**Sim.** Foi executado teste de fumaça criando autor, curso, aluno e inscrição em diretório temporário, além da compilação completa do projeto.
+
+### O trabalho é original e não a cópia de um trabalho de outro grupo?
+
+**Sim.** O código foi desenvolvido sobre a base local existente do projeto e mantém a mesma arquitetura em camadas já usada no TP1.
