@@ -393,7 +393,7 @@ Conta excluída com sucesso.
 
 Adicionar aqui, antes da entrega, o link do vídeo de até 3 minutos:
 
-- `LINK_DO_VIDEO_AQUI`
+- https://www.youtube.com/watch?v=Lg55x-LUR8M
 
 Sugestão de roteiro:
 
