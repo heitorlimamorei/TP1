@@ -1,20 +1,28 @@
 package entrepairs.repository.adapter;
 
 import java.lang.reflect.Constructor;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import aed3.Arquivo;
 import aed3.ArvoreBMais;
+import aed3.ListaInvertida;
+import aed3.ListaInvertida.ElementoLista;
 import entrepairs.model.Course;
+import entrepairs.model.CourseSearchResult;
 import entrepairs.model.CourseStatus;
 import entrepairs.repository.index.CourseShareCodeKey;
 import entrepairs.repository.index.UserCourseKey;
 import entrepairs.repository.index.UserCourseNameKey;
+import entrepairs.util.CourseNameTerms;
 import entrepairs.util.IndexKeys;
 import entrepairs.util.TextNormalizer;
 
@@ -24,6 +32,7 @@ public class Aed3CourseRepository implements AutoCloseable {
     private final ArvoreBMais<CourseShareCodeKey> shareCodeIndex;
     private final ArvoreBMais<UserCourseNameKey> ownerCourseNameIndex;
     private final ArvoreBMais<UserCourseKey> ownerRelationIndex;
+    private final ListaInvertida courseNameIndex;
 
     public Aed3CourseRepository() throws Exception {
         Constructor<CourseRecord> constructor = CourseRecord.class.getConstructor();
@@ -43,6 +52,28 @@ public class Aed3CourseRepository implements AutoCloseable {
             5,
             Path.of("data", "indexes", "courses", "owner-relation.idx").toString()
         );
+        Path dictionaryPath = Path.of("data", "indexes", "courses", "name-terms.dict");
+        Path blocksPath = Path.of("data", "indexes", "courses", "name-terms.blocks");
+        boolean dictionaryExists = Files.exists(dictionaryPath);
+        boolean blocksExist = Files.exists(blocksPath);
+        boolean incompleteIndex = dictionaryExists != blocksExist;
+        if (dictionaryExists && blocksExist) {
+            incompleteIndex = (Files.size(dictionaryPath) == 0) != (Files.size(blocksPath) == 0);
+        }
+        if (incompleteIndex) {
+            Files.deleteIfExists(dictionaryPath);
+            Files.deleteIfExists(blocksPath);
+            dictionaryExists = false;
+            blocksExist = false;
+        }
+        boolean keywordIndexNeedsSync = !dictionaryExists
+            || (Files.size(dictionaryPath) == 0 && Files.size(blocksPath) == 0);
+        this.courseNameIndex = new ListaInvertida(10, dictionaryPath.toString(), blocksPath.toString());
+        if (keywordIndexNeedsSync) {
+            for (CourseRecord record : file.readAll()) {
+                indexCourseName(toModel(record));
+            }
+        }
     }
 
     public int create(Course course) throws Exception {
@@ -93,6 +124,41 @@ public class Aed3CourseRepository implements AutoCloseable {
         return courses;
     }
 
+    public List<CourseSearchResult> searchByNameTerms(String query) throws Exception {
+        Set<String> queryTerms = CourseNameTerms.uniqueTerms(query);
+        if (queryTerms.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        int totalCourses = file.readAll().size();
+        if (totalCourses == 0) {
+            return new ArrayList<>();
+        }
+
+        Map<Integer, Double> scores = new HashMap<>();
+        for (String term : queryTerms) {
+            ElementoLista[] entries = courseNameIndex.read(term);
+            if (entries.length == 0) {
+                continue;
+            }
+            double idf = Math.log10(totalCourses / (double) entries.length) + 1;
+            for (ElementoLista entry : entries) {
+                scores.merge(entry.getId(), entry.getFrequencia() * idf, Double::sum);
+            }
+        }
+
+        List<CourseSearchResult> results = new ArrayList<>();
+        for (Map.Entry<Integer, Double> score : scores.entrySet()) {
+            Optional<Course> course = findById(score.getKey());
+            course.ifPresent(value -> results.add(new CourseSearchResult(value, score.getValue())));
+        }
+        results.sort(Comparator
+            .comparingDouble(CourseSearchResult::getScore).reversed()
+            .thenComparing(result -> TextNormalizer.normalizeForIndex(result.getCourse().getName()))
+            .thenComparingInt(result -> result.getCourse().getId()));
+        return results;
+    }
+
     public List<Integer> findIdsByOwner(int ownerUserId) throws Exception {
         List<Integer> courseIds = new ArrayList<>();
         ArrayList<UserCourseKey> matches = ownerRelationIndex.read(new UserCourseKey(ownerUserId, -1));
@@ -138,6 +204,7 @@ public class Aed3CourseRepository implements AutoCloseable {
     @Override
     public void close() throws Exception {
         file.close();
+        courseNameIndex.close();
         ownerRelationIndex.close();
         ownerCourseNameIndex.close();
         shareCodeIndex.close();
@@ -159,12 +226,26 @@ public class Aed3CourseRepository implements AutoCloseable {
         shareCodeIndex.create(new CourseShareCodeKey(IndexKeys.shareCode(course.getShareCode()), course.getId()));
         ownerCourseNameIndex.create(new UserCourseNameKey(course.getOwnerUserId(), TextNormalizer.normalizeForIndex(course.getName()), course.getId()));
         ownerRelationIndex.create(new UserCourseKey(course.getOwnerUserId(), course.getId()));
+        indexCourseName(course);
     }
 
     private void unindexCourse(Course course) throws Exception {
         shareCodeIndex.delete(new CourseShareCodeKey(IndexKeys.shareCode(course.getShareCode()), course.getId()));
         ownerCourseNameIndex.delete(new UserCourseNameKey(course.getOwnerUserId(), TextNormalizer.normalizeForIndex(course.getName()), course.getId()));
         ownerRelationIndex.delete(new UserCourseKey(course.getOwnerUserId(), course.getId()));
+        unindexCourseName(course);
+    }
+
+    private void indexCourseName(Course course) throws Exception {
+        for (Map.Entry<String, Float> term : CourseNameTerms.termFrequencies(course.getName()).entrySet()) {
+            courseNameIndex.create(term.getKey(), new ElementoLista(course.getId(), term.getValue()));
+        }
+    }
+
+    private void unindexCourseName(Course course) throws Exception {
+        for (String term : CourseNameTerms.uniqueTerms(course.getName())) {
+            courseNameIndex.delete(term, course.getId());
+        }
     }
 
     private CourseRecord toRecord(Course course) {

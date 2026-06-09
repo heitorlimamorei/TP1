@@ -1,8 +1,10 @@
 package entrepairs.view;
 
 import java.util.List;
+import java.util.Locale;
 
 import entrepairs.model.Course;
+import entrepairs.model.CourseSearchResult;
 import entrepairs.model.CourseStatus;
 import entrepairs.model.CourseUser;
 import entrepairs.model.User;
@@ -82,6 +84,37 @@ public class EnrollmentView {
     public String readShareCode() {
         console.showHeader("> Início > Minhas inscrições > Buscar curso por código");
         return console.prompt("Código do curso: ");
+    }
+
+    public String readCourseNameQuery() {
+        console.showHeader("> Início > Minhas inscrições > Buscar curso por palavras-chave");
+        return console.prompt("Palavras-chave: ");
+    }
+
+    public String showCourseSearchPage(List<CourseSearchResult> results, int page, int totalPages) {
+        console.showHeader("> Início > Minhas inscrições > Busca por palavras-chave");
+        console.println("Página " + page + " de " + totalPages);
+        console.println("");
+        if (results.isEmpty()) {
+            console.println("Nenhum curso encontrado.");
+        } else {
+            for (int index = 0; index < results.size(); index++) {
+                int optionNumber = index == 9 ? 0 : index + 1;
+                CourseSearchResult result = results.get(index);
+                Course course = result.getCourse();
+                String relevance = String.format(Locale.ROOT, "%.3f", result.getScore());
+                console.println("(" + optionNumber + ") " + course.getName() + " - "
+                    + DateFormats.format(course.getStartDate()) + " - relevância " + relevance
+                    + statusSuffix(course.getStatus()));
+            }
+        }
+        console.println("");
+        console.println("(A) Página anterior");
+        console.println("(B) Próxima página");
+        console.println("");
+        console.println("(R) Retornar ao menu anterior");
+        console.println("");
+        return console.prompt("Opção: ").toUpperCase();
     }
 
     public String showCoursePage(List<Course> courses, int page, int totalPages) {

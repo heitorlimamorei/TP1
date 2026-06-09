@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 import entrepairs.model.Course;
+import entrepairs.model.CourseSearchResult;
 import entrepairs.model.CourseStatus;
 import entrepairs.model.CourseUser;
 import entrepairs.model.User;
@@ -46,7 +47,7 @@ public class EnrollmentController {
                 if ("A".equals(option)) {
                     searchCourseByCode(activeUser);
                 } else if ("B".equals(option)) {
-                    view.showMessage("A busca por palavras-chave será implementada no TP3.");
+                    searchCoursesByName(activeUser);
                 } else if ("C".equals(option)) {
                     listAllCourses(activeUser);
                 } else if ("R".equals(option)) {
@@ -77,6 +78,42 @@ public class EnrollmentController {
             return;
         }
         showCourseForEnrollment(activeUser, course.get());
+    }
+
+    private void searchCoursesByName(User activeUser) throws Exception {
+        String query = view.readCourseNameQuery();
+        List<CourseSearchResult> results = courseService.searchCoursesByName(activeUser, query);
+        int totalPages = Math.max(1, (int) Math.ceil(results.size() / (double) PAGE_SIZE));
+        int page = 1;
+
+        while (true) {
+            int fromIndex = Math.min((page - 1) * PAGE_SIZE, results.size());
+            int toIndex = Math.min(fromIndex + PAGE_SIZE, results.size());
+            List<CourseSearchResult> currentPage = results.subList(fromIndex, toIndex);
+            String option = view.showCourseSearchPage(currentPage, page, totalPages);
+            if ("A".equals(option)) {
+                if (page > 1) {
+                    page--;
+                } else {
+                    view.showMessage("Você já está na primeira página.");
+                }
+            } else if ("B".equals(option)) {
+                if (page < totalPages) {
+                    page++;
+                } else {
+                    view.showMessage("Você já está na última página.");
+                }
+            } else if ("R".equals(option)) {
+                return;
+            } else {
+                int selectedIndex = parseSelection(option, currentPage.size(), true);
+                if (selectedIndex < 0) {
+                    view.showMessage("Opção inválida.");
+                } else {
+                    showCourseForEnrollment(activeUser, currentPage.get(selectedIndex).getCourse());
+                }
+            }
+        }
     }
 
     private void listAllCourses(User activeUser) throws Exception {

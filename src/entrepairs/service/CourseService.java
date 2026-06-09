@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 import entrepairs.model.Course;
+import entrepairs.model.CourseSearchResult;
 import entrepairs.model.CourseStatus;
 import entrepairs.model.User;
 import entrepairs.repository.adapter.Aed3CourseRepository;
@@ -54,6 +55,16 @@ public class CourseService {
         for (Course course : courseRepository.findAllOrderByStartDate()) {
             if (course.getOwnerUserId() != activeUser.getId()) {
                 courses.add(course);
+            }
+        }
+        return courses;
+    }
+
+    public List<CourseSearchResult> searchCoursesByName(User activeUser, String query) throws Exception {
+        List<CourseSearchResult> courses = new java.util.ArrayList<>();
+        for (CourseSearchResult result : courseRepository.searchByNameTerms(query)) {
+            if (result.getCourse().getOwnerUserId() != activeUser.getId()) {
+                courses.add(result);
             }
         }
         return courses;

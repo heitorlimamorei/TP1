@@ -1,4 +1,4 @@
-# EntrePares 1.0
+# EntrePares 1.0 - TP3
 
 ## Integrantes
 
@@ -21,6 +21,7 @@ Neste trabalho foram implementados:
 - vínculo N:N entre usuários e cursos por meio da entidade `CourseUser` (`CursoUsuario`)
 - listagem dos cursos do usuário ativo em ordem alfabética
 - busca de cursos de outras pessoas por código NanoID
+- busca de cursos por palavras-chave do nome, ordenada por TF-IDF
 - listagem completa de cursos de outras pessoas com paginação de 10 itens
 - inscrição e cancelamento de inscrição pelo aluno
 - gestão de inscritos pelo proponente do curso
@@ -48,7 +49,7 @@ O projeto preserva a infraestrutura base fornecida em aula no pacote [`src/aed3`
   - renderiza menus, mensagens e coleta entradas do usuário
 - `src/entrepairs/model`
   - entidades de domínio
-  - classes: `User`, `Course`, `CourseUser` e enum `CourseStatus`
+  - classes: `User`, `Course`, `CourseUser`, `CourseSearchResult` e enum `CourseStatus`
 - `src/entrepairs/service`
   - regras de negócio de autenticação, perfil e cursos
   - abstrações de suporte como `PasswordHasher` e `ShareCodeGenerator`
@@ -60,6 +61,7 @@ O projeto preserva a infraestrutura base fornecida em aula no pacote [`src/aed3`
   - classes: `UserEmailKey`, `CourseShareCodeKey`, `UserCourseKey`, `UserCourseNameKey`, `CourseEnrollmentKey`, `UserEnrollmentKey`
 - `src/entrepairs/util`
   - utilitários de normalização, datas e padronização de chaves
+  - `CourseNameTerms` extrai termos válidos, remove stop words e calcula TF
 
 ### Fluxo entre camadas
 
@@ -73,11 +75,14 @@ O projeto preserva a infraestrutura base fornecida em aula no pacote [`src/aed3`
 
 - O conteúdo original em português do pacote `aed3` foi preservado.
 - O código da aplicação foi estruturado em inglês, com separação explícita entre domínio e persistência.
+- A classe acadêmica `aed3.ListaInvertida` mantém o dicionário de termos e os blocos encadeados persistidos.
 - As entidades de domínio (`User` e `Course`) não implementam diretamente `Registro`; a serialização fica isolada em `UserRecord` e `CourseRecord`.
 - Os índices secundários e o relacionamento 1:N foram implementados com árvores B+ persistidas em disco.
 - O relacionamento N:N entre cursos e usuários foi implementado com um CRUD próprio de associação e duas árvores B+: uma por curso e outra por usuário.
 - O hash da senha e da resposta secreta foi abstraído por `PasswordHasher`, com implementação atual em `Sha256PasswordHasher`.
 - A geração do código compartilhável do curso foi abstraída por `ShareCodeGenerator`, com implementação atual em `NanoIdShareCodeGenerator`.
+- O índice de nomes armazena somente `(courseId, TF)`; o IDF é calculado durante a consulta com a quantidade atual de cursos e o tamanho da lista do termo.
+- Na primeira execução desta versão, cursos já persistidos são adicionados automaticamente ao novo índice quando os arquivos do índice ainda não existem.
 
 ## Entidades e estruturas persistidas
 
@@ -162,6 +167,37 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - índice secundário por código compartilhável: `data/indexes/courses/share-code.idx`
 - índice por nome do curso dentro do usuário: `data/indexes/courses/owner-name.idx`
 - índice de relacionamento 1:N entre usuário e cursos: `data/indexes/courses/owner-relation.idx`
+- dicionário do índice invertido: `data/indexes/courses/name-terms.dict`
+- blocos do índice invertido: `data/indexes/courses/name-terms.blocks`
+
+### Índice invertido e TF-IDF
+
+O nome de cada curso passa pelo seguinte processamento:
+
+1. remoção de acentos e conversão para letras minúsculas
+2. separação das palavras e descarte de pontuação
+3. remoção de stop words e numerais
+4. contagem das ocorrências de cada termo
+5. cálculo de `TF = ocorrências do termo / total de termos válidos`
+
+Cada termo é associado a elementos `(courseId, TF)` na `ListaInvertida`. Na busca, os termos digitados recebem o mesmo tratamento. Para cada lista recuperada, o sistema calcula:
+
+```text
+IDF = log10(total de cursos / cursos que contêm o termo) + 1
+pontuação do curso = soma(TF × IDF) dos termos consultados
+```
+
+Os resultados são ordenados pela pontuação decrescente. Empates são resolvidos pelo nome normalizado e, depois, pelo ID.
+
+O exemplo numérico do enunciado informa `0,2 × 1,301 = 0,206`. O produto correto é aproximadamente `0,260`; a implementação segue a fórmula definida no próprio enunciado. Essa correção não altera a ordem esperada `[1, 3, 2]`.
+
+### Manutenção do índice
+
+- inclusão: calcula os TFs e adiciona uma entrada em cada lista de termo
+- alteração do nome: remove as entradas do nome anterior e indexa o novo nome
+- alteração de outros dados/estado: mantém o índice consistente pela mesma rotina de reindexação
+- exclusão física: remove o ID de todas as listas associadas ao nome
+- exclusão de usuário com cursos inativos: a remoção dos cursos também atualiza o índice
 
 ### Inscrições
 
@@ -203,11 +239,11 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 
 - listar cursos em que o usuário ativo está inscrito, exibindo estados especiais do curso
 - buscar curso por código NanoID
+- buscar cursos por palavras-chave, com ranking TF-IDF e paginação de 10 resultados
 - listar todos os cursos de outras pessoas com paginação de 10 itens
 - visualizar dados completos do curso e do autor
 - fazer inscrição em cursos abertos
 - cancelar a própria inscrição
-- manter a busca por palavras-chave como item reservado para o TP3
 
 ### Regras de negócio
 
@@ -255,6 +291,7 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - `entrepairs.service.Sha256PasswordHasher`
 - `entrepairs.service.ShareCodeGenerator`
 - `entrepairs.service.NanoIdShareCodeGenerator`
+- `entrepairs.model.CourseSearchResult`
 
 ### Repositories e persistência
 
@@ -267,6 +304,7 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - `aed3.Arquivo`
 - `aed3.HashExtensivel`
 - `aed3.ArvoreBMais`
+- `aed3.ListaInvertida`
 
 ### Índices e utilitários
 
@@ -277,6 +315,7 @@ As árvores B+ armazenam chaves dedicadas para cada necessidade de busca:
 - `entrepairs.repository.index.CourseEnrollmentKey`
 - `entrepairs.repository.index.UserEnrollmentKey`
 - `entrepairs.util.TextNormalizer`
+- `entrepairs.util.CourseNameTerms`
 - `entrepairs.util.IndexKeys`
 - `entrepairs.util.DateFormats`
 
@@ -304,14 +343,54 @@ java -cp out entrepairs.app.Application
 
 ## Testes
 
-O projeto possui artefatos de build voltados a teste em `out-test/`, indicando que já houve compilação separada para esse fim. No estado atual do repositório, porém, os arquivos-fonte e o comando oficial de execução desses testes não estão documentados no workspace.
+Os testes não dependem de bibliotecas externas. O script compila `src/` e `tests/` em um diretório temporário e executa os testes em outro diretório temporário, sem alterar os dados reais em `data/`.
 
-Assim, a validação descrita e reproduzível a partir deste repositório está sendo feita por:
+```sh
+./test.sh
+```
 
-- compilação com `javac`
-- testes de fumaça executando a CLI
-- teste de fumaça automatizado em diretório temporário criando autor, curso, aluno e inscrição
-- verificação manual dos fluxos de autenticação, usuário, cursos e inscrições
+Saída esperada:
+
+```text
+[OK] CourseNameTermsTest
+[OK] ListaInvertidaTest
+[OK] Aed3CourseRepositoryTest
+[OK] EnrollmentControllerTest
+Todos os testes passaram.
+```
+
+### Plano de testes
+
+| ID | Tipo | Cenário | Resultado esperado | Cobertura automatizada |
+|---|---|---|---|---|
+| UT-01 | Unitário | Normalizar `Introdução à Inteligência Artificial` | Vetor `introducao, inteligencia, artificial` | Sim |
+| UT-02 | Unitário | Remover stop words, pontuação e numerais | Somente termos relevantes permanecem | Sim |
+| UT-03 | Unitário | Nome com termo repetido | TF de `inteligencia` igual a `2/5 = 0,4` | Sim |
+| UT-04 | Unitário | Inserir três postagens em blocos de capacidade 2 | Criação de bloco encadeado sem perda de dados | Sim |
+| UT-05 | Unitário | Inserir o mesmo ID duas vezes no mesmo termo | Duplicidade rejeitada | Sim |
+| UT-06 | Unitário | Excluir postagem existente e inexistente | Remoção correta e retorno `false` para ausente | Sim |
+| UT-07 | Unitário | Fechar e reabrir `ListaInvertida` | IDs e frequências permanecem persistidos | Sim |
+| IT-01 | Integração | Cadastrar os quatro cursos do enunciado | Termos e TFs gravados no índice | Sim |
+| IT-02 | Integração | Buscar `Inteligência Artificial` | Ordem dos IDs `[1, 3, 2]` | Sim |
+| IT-03 | Integração | Validar pontuação TF-IDF | Curso 1 ≈ `0,808`; curso 3 ≈ `0,710` | Sim |
+| IT-04 | Integração | Alterar nome do curso 3 para `Programação em Java` | Termos antigos removidos e novos termos pesquisáveis | Sim |
+| IT-05 | Integração | Excluir fisicamente o curso 1 | ID removido das listas invertidas | Sim |
+| IT-06 | Integração | Reabrir o repositório | Busca continua funcionando com dados persistidos | Sim |
+| IT-07 | Integração | Consultar apenas stop words e numerais | Lista vazia, sem erro | Sim |
+| IT-08 | Integração | Remover os arquivos do novo índice e reabrir cursos existentes | Índice é reconstruído automaticamente | Sim |
+| IT-09 | Integração MVC | Acessar a opção B com entrada e saída simuladas | Tela de busca e relevância são exibidas | Sim |
+| IT-10 | Integração MVC | Buscar termo presente em curso próprio e de terceiro | Somente o curso de terceiro aparece | Sim |
+| IT-11 | Integração MVC | Selecionar um resultado da busca | Tela completa do curso é aberta | Sim |
+| IT-12 | Integração MVC | Buscar 11 resultados e avançar a página | Segunda página é exibida corretamente | Sim |
+| MT-01 | Manual | Repetir o fluxo completo na CLI antes da gravação | Telas e mensagens correspondem às evidências | Recomendado antes da entrega |
+
+### Estratégia e critérios
+
+- testes unitários validam transformação textual e operações isoladas da lista invertida
+- testes de integração validam persistência, manutenção do índice e ranking no repositório
+- testes manuais validam navegação, mensagens e paginação da CLI
+- aprovação automatizada exige compilação sem erros e todos os testes com estado `[OK]`
+- aprovação manual exige que nenhuma operação gere exceção e que a ordem visual corresponda ao ranking calculado
 
 Para reiniciar os dados persistidos antes de um novo teste manual:
 
@@ -322,7 +401,7 @@ rm -rf data out
 
 ## Capturas de tela
 
-As capturas abaixo reproduzem saídas reais do terminal obtidas durante os testes de fumaça.
+As saídas abaixo documentam as telas e mensagens usadas nos testes de fumaça e no teste automatizado do fluxo MVC.
 
 ### Cadastro e criação de curso
 
@@ -368,6 +447,18 @@ Nenhuma inscrição cadastrada.
 ```text
 EntrePares 1.0
 --------------
+> Início > Minhas inscrições > Busca por palavras-chave
+
+Página 1 de 1
+
+(1) Introdução à Inteligência Artificial - 20/06/2026 - relevância 0.808
+(2) Inteligência no Trabalho por Meio da Inteligência Artificial - 21/06/2026 - relevância 0.710
+(3) Inteligência Emocional para Gestores - 22/06/2026 - relevância 0.375
+```
+
+```text
+EntrePares 1.0
+--------------
 > Início > Minhas inscrições > Lista de cursos
 
 Página 1 de 1
@@ -401,11 +492,33 @@ Sugestão de roteiro:
 2. login
 3. criação de curso
 4. login com outro usuário
-5. listagem de cursos e inscrição
-6. gerenciamento de inscritos pelo autor
-7. exportação CSV
+5. busca por `Inteligência Artificial` e demonstração da ordem TF-IDF
+6. alteração do nome de um curso e nova busca para comprovar a atualização do índice
+7. inscrição em um resultado e gerenciamento de inscritos pelo autor
 
 ## Checklist solicitado
+
+### O índice invertido com os termos dos nomes dos cursos foi criado usando a classe ListaInvertida?
+
+**Sim.** A classe `aed3.ListaInvertida` persiste um dicionário de termos e blocos encadeados com elementos `(courseId, TF)`. O `Aed3CourseRepository` atualiza esse índice ao incluir, alterar ou excluir fisicamente um curso.
+
+### É possível buscar cursos por palavras no menu de inscrição?
+
+**Sim.** A opção `(B) Buscar curso por palavras-chave` do menu "Minhas inscrições" recebe a consulta, aplica o mesmo tratamento dos nomes, calcula TF-IDF, remove cursos do próprio usuário e mostra os resultados paginados em ordem decrescente de relevância.
+
+### O trabalho compila corretamente?
+
+**Sim.** O projeto compila com Java 11 ou superior pelo `run.sh`, e `test.sh` compila conjuntamente o código de produção e os testes.
+
+### O trabalho está completo e funcionando sem erros de execução?
+
+**Sim, para o escopo solicitado no TP3.** Os testes automatizados de normalização, persistência, ranking, alteração, exclusão e reabertura passam integralmente. O plano acima identifica separadamente as conferências visuais manuais da CLI.
+
+### O trabalho é original e não a cópia de um trabalho de outro grupo?
+
+**Sim.** A solução foi integrada à arquitetura própria do projeto. A estrutura acadêmica da `ListaInvertida`, disponibilizada na disciplina, foi adaptada para armazenar a frequência TF exigida pelo TP3.
+
+## Checklist do TP2 preservado
 
 ### Há um CRUD da entidade de associação CursoUsuario (que estende a classe ArquivoIndexado, acrescentando Tabelas Hash Extensíveis e Árvores B+ como índices diretos e indiretos conforme necessidade) que funciona corretamente?
 
