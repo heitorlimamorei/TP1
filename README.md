@@ -496,58 +496,17 @@ Sugestão de roteiro:
 6. alteração do nome de um curso e nova busca para comprovar a atualização do índice
 7. inscrição em um resultado e gerenciamento de inscritos pelo autor
 
-## Checklist solicitado
+## Implementação das funcionalidades solicitadas
 
-### O índice invertido com os termos dos nomes dos cursos foi criado usando a classe ListaInvertida?
+O trabalho foca na implementação do índice invertido e busca de cursos por palavras-chave do nome, empregando a lógica TF-IDF. O projeto compila corretamente e funciona sem erros de execução, consistindo em um esforço original integrado à arquitetura estabelecida.
 
-**Sim.** A classe `aed3.ListaInvertida` persiste um dicionário de termos e blocos encadeados com elementos `(courseId, TF)`. O `Aed3CourseRepository` atualiza esse índice ao incluir, alterar ou excluir fisicamente um curso.
+### Índice Invertido e Busca TF-IDF
 
-### É possível buscar cursos por palavras no menu de inscrição?
+A busca por palavras-chave está disponível no menu de inscrição e funciona com base nos seguintes princípios implementados:
 
-**Sim.** A opção `(B) Buscar curso por palavras-chave` do menu "Minhas inscrições" recebe a consulta, aplica o mesmo tratamento dos nomes, calcula TF-IDF, remove cursos do próprio usuário e mostra os resultados paginados em ordem decrescente de relevância.
+- **Índice Invertido**: Construído utilizando a classe `aed3.ListaInvertida` (adaptada para armazenar também o valor TF de cada termo). O índice é atualizado dinamicamente pelo repositório sempre que um curso é inserido, removido ou tem seu nome alterado.
+- **Processamento de Termos**: Tanto na indexação quanto na busca, os textos têm acentos removidos, são convertidos para minúsculas e têm sua pontuação, numerais e *stop words* ignorados.
+- **Cálculo de TF-IDF**: O índice armazena o valor TF (frequência do termo no nome). Durante as buscas, o IDF é calculado dinamicamente considerando o total de cursos cadastrados utilizando a fórmula `log10(total_cursos / cursos_com_o_termo) + 1`. Os valores são multiplicados e as pontuações para um mesmo ID são somadas.
+- **Ordenação**: Os resultados da busca são apresentados aos usuários de forma paginada (de 10 em 10) e ordenados decrescentemente pelo valor calculado de TFxIDF.
 
-### O trabalho compila corretamente?
-
-**Sim.** O projeto compila com Java 11 ou superior pelo `run.sh`, e `test.sh` compila conjuntamente o código de produção e os testes.
-
-### O trabalho está completo e funcionando sem erros de execução?
-
-**Sim, para o escopo solicitado no TP3.** Os testes automatizados de normalização, persistência, ranking, alteração, exclusão e reabertura passam integralmente. O plano acima identifica separadamente as conferências visuais manuais da CLI.
-
-### O trabalho é original e não a cópia de um trabalho de outro grupo?
-
-**Sim.** A solução foi integrada à arquitetura própria do projeto. A estrutura acadêmica da `ListaInvertida`, disponibilizada na disciplina, foi adaptada para armazenar a frequência TF exigida pelo TP3.
-
-## Checklist do TP2 preservado
-
-### Há um CRUD da entidade de associação CursoUsuario (que estende a classe ArquivoIndexado, acrescentando Tabelas Hash Extensíveis e Árvores B+ como índices diretos e indiretos conforme necessidade) que funciona corretamente?
-
-**Sim.** Dentro da arquitetura deste projeto, a entidade de associação foi implementada como `CourseUser` (`CursoUsuario`) com CRUD em `Aed3CourseUserRepository`. O repositório usa `aed3.Arquivo`, que mantém o índice direto com Hash Extensível, e acrescenta duas Árvores B+: `CourseEnrollmentKey` para `courseId -> courseUserId` e `UserEnrollmentKey` para `userId -> courseUserId`.
-
-### A visão de inscrições está corretamente implementada e permite consultas aos cursos em que um usuário está inscrito?
-
-**Sim.** `EnrollmentController` e `EnrollmentView` implementam o menu "Minhas inscrições", listam os cursos do usuário ativo, mostram dados completos do curso e permitem cancelar a própria inscrição.
-
-### A visão de cursos funciona corretamente e permite a gestão dos usuários inscritos em um curso?
-
-**Sim.** A opção "Gerenciar inscritos no curso" em "Meus cursos" lista usuários inscritos, mostra nome, e-mail e data de inscrição, permite cancelar uma inscrição e exporta a lista em CSV.
-
-### Há uma visualização dos cursos de outras pessoas por meio de um código NanoID?
-
-**Sim.** A opção "Buscar curso por código" consulta o índice `CourseShareCodeKey` e abre diretamente a tela completa do curso encontrado, sem passar pela tela de lista.
-
-### A integridade do relacionamento entre cursos e usuários está mantida em todas as operações?
-
-**Sim.** O sistema bloqueia inscrição duplicada, impede inscrição no próprio curso, só permite novas inscrições em cursos abertos, remove inscrições ao excluir usuário e remove inscrições de cursos removidos fisicamente durante exclusão de conta. O cancelamento de curso marca o curso como `CANCELED`, preservando as inscrições existentes para exibição do estado.
-
-### O trabalho compila corretamente?
-
-**Sim.** O projeto compila com `javac -d out $(find src -name '*.java' | sort)` sem erros.
-
-### O trabalho está completo e funcionando sem erros de execução?
-
-**Sim.** Foi executado teste de fumaça criando autor, curso, aluno e inscrição em diretório temporário, além da compilação completa do projeto.
-
-### O trabalho é original e não a cópia de um trabalho de outro grupo?
-
-**Sim.** O código foi desenvolvido sobre a base local existente do projeto e mantém a mesma arquitetura em camadas já usada no TP1.
+As demais funcionalidades de gerenciamento de inscrições e relacionamento de usuários e cursos implementadas nas etapas anteriores foram preservadas, com os devidos índices diretos (Hash Extensível) e secundários (Árvores B+) operando corretamente.
